@@ -1,0 +1,88 @@
+# Overrides for prometheus-community/kube-prometheus-stack.
+# The chart defaults are fine at homelab scale; this file is the place to tune them.
+# Chart version is pinned in scripts/install-monitoring.sh. Check these keys when bumping it.
+#
+# Don't commit a Grafana password here. scripts/install-monitoring.sh creates the
+# grafana-admin Secret, and the chart reads the password from it (see grafana.admin).
+
+prometheus:
+  prometheusSpec:
+    retention: 15d       # chart default, stated explicitly
+    retentionSize: 8GB   # whichever limit is hit first wins; keep below the volume size
+
+    # Without this, metrics live in an emptyDir and vanish when the pod restarts.
+    # local-path (bundled with k3s) pins the volume to one node. Move to Longhorn
+    # once it's installed so the data survives losing that node.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    # Memory grows with the number of active series. The limit stops a runaway
+    # scrape from starving the node. No CPU limit, to avoid throttling during compaction.
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+grafana:
+  # Read the login from a Secret we create, instead of passing it through --set
+  # (which would store it in Helm's release history).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # Most of these are already Grafana's defaults. Stating them keeps a future
+  # chart or Grafana release from quietly changing them.
+  grafana.ini:
+    users:
+      allow_sign_up: false
+      allow_org_create: false
+    auth.anonymous:
+      enabled: false
+    security:
+      disable_gravatar: true    # no requests to gravatar.com leaking user emails
+      cookie_samesite: strict
+    snapshots:
+      external_enabled: false   # no "publish snapshot" to snapshots.raintank.io
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+      check_for_plugin_updates: false
+
+  # Keeps dashboards, users and settings made in the UI across restarts.
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: local-path
+    accessModes: ["ReadWriteOnce"]
+    size: 2Gi
+  # A ReadWriteOnce volume can't be shared by the old and new pod during a
+  # rolling update, so replace the pod instead.
+  deploymentStrategy:
+    type: Recreate
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# k3s runs the scheduler, controller-manager, kube-proxy and etcd inside the k3s
+# binary, so there are no separate endpoints to scrape. Left enabled, their
+# targets show as down and their "...Down" alerts fire permanently.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false

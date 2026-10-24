@@ -1,0 +1,60 @@
+# Prometheus and Alertmanager have no authentication, so restrict who can reach them.
+# k3s enforces NetworkPolicy out of the box (embedded kube-router). Only ingress is
+# restricted here; Prometheus still scrapes targets anywhere in the cluster.
+# kubectl port-forward and kubelet health probes are unaffected.
+#
+# Applied by scripts/install-monitoring.sh after the chart.
+
+# Prometheus: only pods in the monitoring namespace (Grafana, Alertmanager, the
+# operator, Prometheus itself).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Alertmanager: only pods in the monitoring namespace (Prometheus sends alerts here).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Grafana: only Traefik (for grafana-ingress.yaml). Other pods can't reach its login page.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 3000
+          protocol: TCP
