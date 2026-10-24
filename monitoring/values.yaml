@@ -7,12 +7,12 @@
 
 prometheus:
   prometheusSpec:
-    retention: 15d       # chart default, stated explicitly
+    retention: 15d       # chart default is 10d
     retentionSize: 8GB   # whichever limit is hit first wins; keep below the volume size
 
     # Without this, metrics live in an emptyDir and vanish when the pod restarts.
     # local-path (bundled with k3s) pins the volume to one node. Move to Longhorn
-    # once it's installed so the data survives losing that node.
+    # once it's installed, so the data survives losing that node.
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -23,7 +23,7 @@ prometheus:
               storage: 10Gi
 
     # Memory grows with the number of active series. The limit stops a runaway
-    # scrape from starving the node. No CPU limit, to avoid throttling during compaction.
+    # scrape from starving the node. No CPU limit, so compaction isn't throttled.
     resources:
       requests:
         cpu: 200m
@@ -32,8 +32,8 @@ prometheus:
         memory: 2Gi
 
 grafana:
-  # Read the login from a Secret we create, instead of passing it through --set
-  # (which would store it in Helm's release history).
+  # Login comes from the Secret created by install-monitoring.sh. Passing it with
+  # --set would store it in Helm's release history.
   admin:
     existingSecret: grafana-admin
     userKey: admin-user
@@ -58,22 +58,27 @@ grafana:
       check_for_plugin_updates: false
 
   # Keeps dashboards, users and settings made in the UI across restarts.
+  # Same local-path caveat as Prometheus: the volume lives on one node.
   persistence:
     enabled: true
     type: pvc
     storageClassName: local-path
     accessModes: ["ReadWriteOnce"]
     size: 2Gi
+
   # A ReadWriteOnce volume can't be shared by the old and new pod during a
   # rolling update, so replace the pod instead.
   deploymentStrategy:
     type: Recreate
+
+  # Grafana 13 idles around 300Mi and spikes while a dashboard runs its queries
+  # in parallel. Below about 1Gi, opening a large dashboard can get it OOMKilled.
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
 
 # k3s runs the scheduler, controller-manager, kube-proxy and etcd inside the k3s
 # binary, so there are no separate endpoints to scrape. Left enabled, their
