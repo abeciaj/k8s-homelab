@@ -74,6 +74,17 @@ echo "<node-ip> grafana.home.lab" | sudo tee -a /etc/hosts
 Starting dashboards: **Node Exporter / Nodes**, **Kubernetes / Compute Resources / Cluster**,
 **Kubernetes / Compute Resources / Namespace (Pods)**.
 
+**If ufw is already on your nodes** with per-port rules from the cluster setup, Prometheus
+can only scrape node-exporter on its own node. The others time out, and the Nodes dashboard
+shows one machine. Allow 9100 from the cluster, and nothing else, on each node:
+
+```bash
+for node in <node1-ip> <node2-ip> <node3-ip>; do
+  ssh -t <user>@$node 'for src in <node1-ip> <node2-ip> <node3-ip> 10.42.0.0/16; do
+    sudo ufw allow from $src to any port 9100 proto tcp comment node-exporter; done'
+done
+```
+
 ## What `values.yaml` changes from the chart defaults
 
 - **Persistent storage.** Prometheus (10Gi) and Grafana (2Gi) store data on `local-path`

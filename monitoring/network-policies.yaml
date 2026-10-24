@@ -36,7 +36,8 @@ spec:
     - from:
         - podSelector: {}
 ---
-# Grafana: only Traefik (for grafana-ingress.yaml). Other pods can't reach its login page.
+# Grafana: Traefik (for grafana-ingress.yaml) and Prometheus (scrapes Grafana's
+# own /metrics). Other pods can't reach its login page.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -55,6 +56,9 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
       ports:
         - port: 3000
           protocol: TCP
