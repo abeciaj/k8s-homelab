@@ -8,7 +8,7 @@ Alertmanager, node-exporter, kube-state-metrics) plus a Grafana Ingress via k3s'
 
 ```
 monitoring/values.yaml      Helm overrides for kube-prometheus-stack
-monitoring/grafana-ingress.yaml   Ingress for grafana.home.lab (Traefik)
+monitoring/grafana-ingress.yaml   HTTPS Ingress for grafana.home.lab (Traefik)
 monitoring/network-policies.yaml  Limits who can reach Prometheus, Alertmanager, Grafana
 scripts/install-monitoring.sh     Checks nodes, installs/upgrades the chart
 scripts/grafana-password.sh       Prints the Grafana admin password
@@ -66,10 +66,13 @@ kubectl get pods -n monitoring -w
 ./scripts/grafana-port-forward.sh     # then open http://localhost:3000
 ./scripts/grafana-password.sh         # login as admin
 
-# Stable LAN address. Plain HTTP: your login crosses the LAN unencrypted until TLS is added.
+# Stable LAN address, no port-forward: https://grafana.home.lab
 kubectl apply -f monitoring/grafana-ingress.yaml
 echo "<node-ip> grafana.home.lab" | sudo tee -a /etc/hosts
 ```
+
+The Ingress serves HTTPS only, using Traefik's built-in self-signed certificate,
+so browsers show a one-time certificate warning. Plain `http://` isn't routed.
 
 Starting dashboards: **Node Exporter / Nodes**, **Kubernetes / Compute Resources / Cluster**,
 **Kubernetes / Compute Resources / Namespace (Pods)**.
