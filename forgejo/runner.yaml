@@ -148,7 +148,7 @@ spec:
 
         # The only privileged container. It runs the job containers in its own Docker
         # engine, which is root-equivalent on the node: fine for your own repos, not
-        # for untrusted code (see README).
+        # for untrusted code (see forgejo/README.md).
         - name: dind
           image: docker.io/library/docker:29.9.2-dind
           env:

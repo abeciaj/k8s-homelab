@@ -1,5 +1,5 @@
 # Overrides for the cert-manager chart (oci://quay.io/jetstack/charts/cert-manager).
-# Chart version is pinned in scripts/install-cert-manager.sh.
+# Chart version is pinned in scripts/install-cert-manager.sh. Check these keys when bumping it.
 
 crds:
   enabled: true

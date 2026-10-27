@@ -33,8 +33,9 @@ scripts/install-forgejo.sh     Installs/upgrades everything and registers the ru
 
 ## Install
 
+Run `./scripts/install-cert-manager.sh` first if you haven't already, then:
+
 ```bash
-./scripts/install-cert-manager.sh   # once, if you haven't already
 ./scripts/install-forgejo.sh
 ```
 

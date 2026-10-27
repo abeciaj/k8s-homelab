@@ -1,5 +1,6 @@
 # Forgejo and its runner live in separate namespaces so Pod Security can be strict
 # where it's possible and loose only where it has to be.
+# Applied by scripts/install-forgejo.sh before the chart.
 
 # Forgejo itself runs rootless, so the whole namespace enforces "restricted".
 apiVersion: v1
