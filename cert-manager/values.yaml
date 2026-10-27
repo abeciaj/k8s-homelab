@@ -1,0 +1,13 @@
+# Overrides for the cert-manager chart (oci://quay.io/jetstack/charts/cert-manager).
+# Chart version is pinned in scripts/install-cert-manager.sh.
+
+crds:
+  enabled: true
+  keep: true   # uninstalling the chart doesn't delete every Certificate with it
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

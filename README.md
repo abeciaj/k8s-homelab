@@ -3,6 +3,8 @@
 A 3-node k3s homelab on Debian, from the **Back to On-Prem** series. This repo holds
 the monitoring layer from Part 3: kube-prometheus-stack (Prometheus, Grafana,
 Alertmanager, node-exporter, kube-state-metrics) plus a Grafana Ingress via k3s's Traefik.
+It also holds a self-hosted Git server with CI/CD (Forgejo + Forgejo Actions); see
+[forgejo/README.md](forgejo/README.md).
 
 ## Layout
 
@@ -13,6 +15,10 @@ monitoring/network-policies.yaml  Limits who can reach Prometheus, Alertmanager,
 scripts/install-monitoring.sh     Checks nodes, installs/upgrades the chart
 scripts/grafana-password.sh       Prints the Grafana admin password
 scripts/grafana-port-forward.sh   Forwards Grafana to localhost:3000
+scripts/install-forgejo.sh        Installs/upgrades Forgejo and its Actions runner
+scripts/install-cert-manager.sh   Installs cert-manager and the Homelab CA
+forgejo/                          Forgejo values, runner, namespaces, network policies
+cert-manager/                     cert-manager values and the Homelab CA
 ```
 
 ## Prerequisites
@@ -55,6 +61,21 @@ they talk to the k3s API server on port 6443, and the cluster schedules the pods
    helm version
    ```
 
+## Trusted certificates
+
+cert-manager runs a private **Homelab CA** that issues certificates for `*.home.lab`.
+Grafana and Forgejo get theirs automatically and renew them before they expire.
+Install it before the Grafana Ingress or Forgejo, then trust the CA once per device:
+
+```bash
+./scripts/install-cert-manager.sh
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain ~/homelab-ca.crt   # macOS, once
+```
+
+See [cert-manager/README.md](cert-manager/README.md) for other devices, keeping an
+offline copy of the CA, alerts and adding certificates to new services.
+
 ## Quick start
 
 ```bash
@@ -67,12 +88,14 @@ kubectl get pods -n monitoring -w
 ./scripts/grafana-password.sh         # login as admin
 
 # Stable LAN address, no port-forward: https://grafana.home.lab
+# NODE_IP is any node's IP
 kubectl apply -f monitoring/grafana-ingress.yaml
-echo "<node-ip> grafana.home.lab" | sudo tee -a /etc/hosts
+NODE_IP=192.168.0.151
+echo "$NODE_IP grafana.home.lab" | sudo tee -a /etc/hosts
 ```
 
-The Ingress serves HTTPS only, using Traefik's built-in self-signed certificate,
-so browsers show a one-time certificate warning. Plain `http://` isn't routed.
+The Ingress serves HTTPS only, with a certificate from the Homelab CA (see
+"Trusted certificates"). Plain `http://` isn't routed.
 
 Starting dashboards: **Node Exporter / Nodes**, **Kubernetes / Compute Resources / Cluster**,
 **Kubernetes / Compute Resources / Namespace (Pods)**.

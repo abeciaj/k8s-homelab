@@ -1,0 +1,195 @@
+# Forgejo Actions runner with a Docker-in-Docker sidecar.
+# Based on the runner's official Kubernetes example (examples/kubernetes in
+# code.forgejo.org/forgejo/runner), with the runner kept unprivileged and jobs kept
+# away from the Docker daemon.
+#
+# Registration is offline: scripts/install-forgejo.sh registers the runner in
+# Forgejo with a shared secret and stores it in the forgejo-runner Secret
+# (keys: uuid, token). Applied by that script after the chart, along with the
+# homelab-ca ConfigMap.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forgejo-runner
+  namespace: forgejo-runner
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forgejo-runner-config
+  namespace: forgejo-runner
+data:
+  # RUNNER_UUID is filled in from the Secret at startup; the token is read from
+  # the mounted Secret file, so neither is stored in this ConfigMap.
+  config.yaml: |
+    log:
+      level: info
+    runner:
+      capacity: 1
+      timeout: 1h
+      # Job containers trust the Homelab CA for forgejo.home.lab only, so
+      # actions/checkout works. Git's trust is scoped to that host; Node adds the
+      # CA to its built-in list rather than replacing it.
+      envs:
+        NODE_EXTRA_CA_CERTS: /etc/homelab-ca/ca.crt
+        GIT_CONFIG_COUNT: "1"
+        GIT_CONFIG_KEY_0: http.https://forgejo.home.lab/.sslCAInfo
+        GIT_CONFIG_VALUE_0: /etc/homelab-ca/ca.crt
+    cache:
+      enabled: true
+      dir: /data/cache
+    container:
+      network: ""
+      privileged: false
+      # "-" keeps the Docker daemon out of job containers. A job that can reach the
+      # privileged daemon can start a privileged container and take over the node.
+      docker_host: "-"
+      # The CA certificate, read-only. The path is on the dind container, which
+      # mounts it from the homelab-ca ConfigMap.
+      options: -v /etc/homelab-ca:/etc/homelab-ca:ro
+      valid_volumes:
+        - /etc/homelab-ca
+    server:
+      connections:
+        forgejo:
+          url: http://forgejo-http.forgejo.svc.cluster.local:3000/
+          uuid: RUNNER_UUID
+          token_url: file:/var/run/forgejo-runner/token
+          labels:
+            - docker:docker://node:24-trixie
+---
+# Docker's image and layer cache, so images aren't pulled again on every job.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-runner-docker
+  namespace: forgejo-runner
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forgejo-runner
+  namespace: forgejo-runner
+  labels:
+    app.kubernetes.io/name: forgejo-runner
+spec:
+  replicas: 1
+  # The Docker cache volume is ReadWriteOnce, so replace the pod instead of rolling.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo-runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: forgejo-runner
+    spec:
+      serviceAccountName: forgejo-runner
+      automountServiceAccountToken: false
+      containers:
+        - name: runner
+          image: code.forgejo.org/forgejo/runner:13.2.0
+          command: [sh, -c]
+          args:
+            - |
+              sed "s/RUNNER_UUID/${RUNNER_UUID}/" /etc/forgejo-runner/config.yaml > /data/config.yaml
+              until nc -z 127.0.0.1 2376; do echo 'waiting for docker daemon...'; sleep 5; done
+              exec forgejo-runner --config /data/config.yaml daemon
+          workingDir: /data
+          env:
+            - name: RUNNER_UUID
+              valueFrom:
+                secretKeyRef:
+                  name: forgejo-runner
+                  key: uuid
+            - name: DOCKER_HOST
+              value: tcp://127.0.0.1:2376
+            - name: DOCKER_TLS_VERIFY
+              value: "1"
+            - name: DOCKER_CERT_PATH
+              value: /certs/client
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /etc/forgejo-runner
+              readOnly: true
+            - name: token
+              mountPath: /var/run/forgejo-runner
+              readOnly: true
+            - name: docker-certs
+              mountPath: /certs
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+
+        # The only privileged container. It runs the job containers in its own Docker
+        # engine, which is root-equivalent on the node: fine for your own repos, not
+        # for untrusted code (see README).
+        - name: dind
+          image: docker.io/library/docker:29.9.2-dind
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: /certs
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: docker-certs
+              mountPath: /certs
+            - name: docker-data
+              mountPath: /var/lib/docker
+            - name: homelab-ca
+              mountPath: /etc/homelab-ca
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: forgejo-runner-config
+        - name: token
+          secret:
+            secretName: forgejo-runner
+            items:
+              - key: token
+                path: token
+        - name: docker-certs
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: docker-data
+          persistentVolumeClaim:
+            claimName: forgejo-runner-docker
+        # Public CA certificate, copied from cert-manager by scripts/install-forgejo.sh.
+        - name: homelab-ca
+          configMap:
+            name: homelab-ca

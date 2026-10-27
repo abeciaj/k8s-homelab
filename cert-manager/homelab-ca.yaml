@@ -1,0 +1,45 @@
+# A private CA for *.home.lab, so Grafana, Forgejo and anything later get
+# certificates your devices can trust. Applied by scripts/install-cert-manager.sh.
+
+# Only used once, to sign the CA certificate below.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# The CA itself. Its key stays in the homelab-ca Secret in the cert-manager namespace.
+# The name constraint limits it to home.lab names, so even a leaked key can't be
+# used to impersonate a real website to a device that trusts this CA.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: homelab-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: Homelab CA
+  secretName: homelab-ca
+  duration: 87600h   # 10 years; every device trusts this certificate, so keep it stable
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  nameConstraints:
+    critical: true
+    permitted:
+      dnsDomains:
+        - home.lab
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+# What Ingresses reference (cert-manager.io/cluster-issuer: homelab-ca). Issued
+# certificates last 90 days and renew automatically 30 days before they expire.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: homelab-ca
+spec:
+  ca:
+    secretName: homelab-ca
