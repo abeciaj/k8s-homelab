@@ -1,0 +1,10 @@
+# Credentials that must never be committed: kubeconfigs, keys, CA backups
+kubeconfig*
+k3s.yaml
+*.pem
+*.key
+*.crt
+*-secret.yaml
+homelab-ca-backup*
+
+.DS_Store

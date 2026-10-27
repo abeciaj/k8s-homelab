@@ -1,0 +1,13 @@
+# Lets pods resolve forgejo.home.lab to Traefik, so CI jobs reach Forgejo by the
+# same name and certificate as your browser. k3s's CoreDNS imports *.override keys
+# from this ConfigMap; it's one ConfigMap for the whole cluster, so add any future
+# entries here rather than creating another.
+# Applied by scripts/install-forgejo.sh, which restarts CoreDNS when it changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  home-lab.override: |
+    rewrite stop name exact forgejo.home.lab traefik.kube-system.svc.cluster.local answer auto

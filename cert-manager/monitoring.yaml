@@ -1,0 +1,8 @@
+# Extra cert-manager values, used only when the monitoring stack is installed
+# (scripts/install-cert-manager.sh checks for its ServiceMonitor CRD).
+prometheus:
+  servicemonitor:
+    enabled: true
+    # kube-prometheus-stack only picks up ServiceMonitors labelled with its release.
+    labels:
+      release: monitoring

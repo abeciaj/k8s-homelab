@@ -1,17 +1,18 @@
-# HTTPS only, using Traefik's built-in self-signed certificate, so the Grafana
-# login never crosses the LAN in plain text. Browsers warn once about the
-# certificate; a trusted one needs cert-manager.
+# HTTPS only, with a certificate from the Homelab CA (scripts/install-cert-manager.sh),
+# so the Grafana login never crosses the LAN in plain text.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: grafana
   namespace: monitoring
   annotations:
+    cert-manager.io/cluster-issuer: homelab-ca
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
   tls:
-    - hosts:
+    - secretName: grafana-tls
+      hosts:
         - grafana.home.lab
   rules:
     - host: grafana.home.lab   # add this to your router's DNS or /etc/hosts

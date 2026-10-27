@@ -1,0 +1,37 @@
+# Alerts for certificates that renewal can't fix on its own. Certificates renew
+# 30 days before expiry, so one with under 14 days left means renewal is failing.
+# Applied by scripts/install-cert-manager.sh when the monitoring stack is installed.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+  labels:
+    release: monitoring   # kube-prometheus-stack only loads rules with this label
+spec:
+  groups:
+    - name: cert-manager
+      rules:
+        - alert: CertificateNotReady
+          expr: max by (namespace, name) (certmanager_certificate_ready_status{condition="False"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Certificate {{ $labels.namespace }}/{{ $labels.name }} is not ready
+            description: Check it with `kubectl describe certificate -n {{ $labels.namespace }} {{ $labels.name }}`.
+        - alert: CertificateExpiringSoon
+          expr: min by (namespace, name) (certmanager_certificate_expiration_timestamp_seconds) - time() < 14 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in under 14 days
+            description: It should have renewed at 30 days. Check the cert-manager logs.
+        - alert: CertManagerDown
+          expr: absent(up{job="cert-manager", namespace="cert-manager"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: cert-manager isn't being scraped, so certificates may not renew

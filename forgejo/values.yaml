@@ -1,0 +1,117 @@
+# Overrides for the Forgejo chart (oci://code.forgejo.org/forgejo-helm/forgejo).
+# Chart version is pinned in scripts/install-forgejo.sh. Check these keys when bumping it.
+#
+# Don't commit the admin password here. scripts/install-forgejo.sh creates the
+# forgejo-admin Secret, and the chart reads the login from it (see gitea.admin).
+
+# Rootless image: runs as UID 1000, so the pods can meet Pod Security "restricted"
+# (enforced on the forgejo namespace, see namespaces.yaml).
+image:
+  rootless: true
+
+podSecurityContext:
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+
+# Forgejo never calls the Kubernetes API, so don't mount an API token into it.
+serviceAccount:
+  create: true
+  automountServiceAccountToken: false
+
+# The bundled `helm test` pod doesn't meet "restricted" and isn't needed.
+test:
+  enabled: false
+
+# SQLite on this volume. local-path pins it to one node; move to Longhorn once
+# it's installed, so the data survives losing that node.
+persistence:
+  enabled: true
+  storageClass: local-path
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# HTTPS only, with a certificate from the Homelab CA (scripts/install-cert-manager.sh).
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: homelab-ca
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  hosts:
+    - host: forgejo.home.lab
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: forgejo-tls
+      hosts:
+        - forgejo.home.lab
+
+gitea:
+  admin:
+    existingSecret: forgejo-admin      # keys: username, password
+    email: admin@forgejo.home.lab
+    # Set the password on first install only. With keepUpdated (the chart default),
+    # every helm upgrade would reset a password changed in the UI.
+    passwordMode: initialOnlyNoReset
+
+  config:
+    APP_NAME: Forgejo
+    server:
+      DOMAIN: forgejo.home.lab
+      ROOT_URL: https://forgejo.home.lab/
+      # Git over HTTPS only: no SSH server, so no extra port to expose and secure.
+      # Use access tokens or a credential helper for push.
+      DISABLE_SSH: true
+      START_SSH_SERVER: false
+      LANDING_PAGE: login
+    database:
+      DB_TYPE: sqlite3
+    service:
+      DISABLE_REGISTRATION: true
+      REQUIRE_SIGNIN_VIEW: true          # nothing is visible without logging in
+      DEFAULT_KEEP_EMAIL_PRIVATE: true
+      ENABLE_NOTIFY_MAIL: false
+    repository:
+      DEFAULT_PRIVATE: private
+    security:
+      MIN_PASSWORD_LENGTH: 12
+      PASSWORD_COMPLEXITY: lower,upper,digit
+      LOGIN_REMEMBER_DAYS: 7
+      # Every account must set up 2FA (TOTP or a security key) at next login.
+      # 2FA secrets are encrypted with SECRET_KEY, which the chart keeps in app.ini
+      # on the data volume.
+      GLOBAL_TWO_FACTOR_REQUIREMENT: all
+    session:
+      PROVIDER: db                       # logins survive restarts and upgrades
+      COOKIE_SECURE: true                # served only over HTTPS
+      SAME_SITE: strict
+    openid:
+      ENABLE_OPENID_SIGNIN: false
+      ENABLE_OPENID_SIGNUP: false
+    actions:
+      ENABLED: true
+    cron.update_checker:
+      ENABLED: false                     # no outbound version checks
+    other:
+      SHOW_FOOTER_VERSION: false

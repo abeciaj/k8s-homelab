@@ -3,6 +3,8 @@
 A 3-node k3s homelab on Debian, from the **Back to On-Prem** series. This repo holds
 the monitoring layer from Part 3: kube-prometheus-stack (Prometheus, Grafana,
 Alertmanager, node-exporter, kube-state-metrics) plus a Grafana Ingress via k3s's Traefik.
+It also holds a self-hosted Git server with CI/CD (Forgejo + Forgejo Actions); see
+[forgejo/README.md](forgejo/README.md).
 
 ## Layout
 
@@ -13,6 +15,10 @@ monitoring/network-policies.yaml  Limits who can reach Prometheus, Alertmanager,
 scripts/install-monitoring.sh     Checks nodes, installs/upgrades the chart
 scripts/grafana-password.sh       Prints the Grafana admin password
 scripts/grafana-port-forward.sh   Forwards Grafana to localhost:3000
+scripts/install-forgejo.sh        Installs/upgrades Forgejo and its Actions runner
+scripts/install-cert-manager.sh   Installs cert-manager and the Homelab CA
+forgejo/                          Forgejo values, runner, namespaces, network policies
+cert-manager/                     cert-manager values and the Homelab CA
 ```
 
 ## Prerequisites
@@ -33,12 +39,12 @@ they talk to the k3s API server on port 6443, and the cluster schedules the pods
 
 3. **A kubeconfig for the cluster.** k3s writes one on the server node at
    `/etc/rancher/k3s/k3s.yaml`. It is root-only and points at `127.0.0.1`, so copy it with
-   sudo and swap in the server's IP:
+   sudo and swap in the server's IP. On Linux, drop the `''` after `sed -i`:
 
    ```bash
    mkdir -p ~/.kube
    ssh <user>@<server-ip> sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
-   sed -i '' 's/127.0.0.1/<server-ip>/' ~/.kube/config   # Linux: sed -i 's/...'
+   sed -i '' 's/127.0.0.1/<server-ip>/' ~/.kube/config
    chmod 600 ~/.kube/config
    ```
 
@@ -48,31 +54,57 @@ they talk to the k3s API server on port 6443, and the cluster schedules the pods
    Instead, SSH in, run `sudo cat /etc/rancher/k3s/k3s.yaml`, and paste the output
    into the file.
 
-4. **Check that it works:**
+4. **Check that it works.** All 3 nodes should show `STATUS Ready`:
 
    ```bash
-   kubectl get nodes   # all 3 nodes, STATUS Ready
+   kubectl get nodes
    helm version
    ```
 
-## Quick start
+## Trusted certificates
+
+cert-manager runs a private **Homelab CA** that issues certificates for `*.home.lab`.
+Grafana and Forgejo get theirs automatically and renew them before they expire.
+Install it before the Grafana Ingress or Forgejo, then trust the CA once per device.
+On macOS:
 
 ```bash
-# Install. On first run it asks for a Grafana admin password (empty = generate one).
-./scripts/install-monitoring.sh
-kubectl get pods -n monitoring -w
-
-# First look
-./scripts/grafana-port-forward.sh     # then open http://localhost:3000
-./scripts/grafana-password.sh         # login as admin
-
-# Stable LAN address, no port-forward: https://grafana.home.lab
-kubectl apply -f monitoring/grafana-ingress.yaml
-echo "<node-ip> grafana.home.lab" | sudo tee -a /etc/hosts
+./scripts/install-cert-manager.sh
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain ~/homelab-ca.crt
 ```
 
-The Ingress serves HTTPS only, using Traefik's built-in self-signed certificate,
-so browsers show a one-time certificate warning. Plain `http://` isn't routed.
+See [cert-manager/README.md](cert-manager/README.md) for other devices, keeping an
+offline copy of the CA, alerts and adding certificates to new services.
+
+## Quick start
+
+Install. On first run it asks for a Grafana admin password (empty = generate one):
+
+```bash
+./scripts/install-monitoring.sh
+kubectl get pods -n monitoring -w
+```
+
+First look: print the admin password, then forward Grafana and log in as `admin` at
+http://localhost:3000. The port-forward runs until you press Ctrl+C:
+
+```bash
+./scripts/grafana-password.sh
+./scripts/grafana-port-forward.sh
+```
+
+For a stable LAN address with no port-forward, apply the Ingress and point
+grafana.home.lab at any node's IP:
+
+```bash
+kubectl apply -f monitoring/grafana-ingress.yaml
+NODE_IP=192.168.0.151
+echo "$NODE_IP grafana.home.lab" | sudo tee -a /etc/hosts
+```
+
+The Ingress serves HTTPS only, with a certificate from the Homelab CA (see
+"Trusted certificates"). Plain `http://` isn't routed.
 
 Starting dashboards: **Node Exporter / Nodes**, **Kubernetes / Compute Resources / Cluster**,
 **Kubernetes / Compute Resources / Namespace (Pods)**.
@@ -130,11 +162,12 @@ read the chart's upgrade notes first, because `helm upgrade` does not update the
 These run outside the repo, so the install script doesn't do them.
 
 **Protect the kubeconfig.** `~/.kube/config` holds a cluster-admin certificate. Anyone
-with the file controls the cluster.
+with the file controls the cluster. Lock down the file, and on macOS check that
+`fdesetup status` says "FileVault is On":
 
 ```bash
 chmod 600 ~/.kube/config
-fdesetup status        # macOS: should say "FileVault is On"
+fdesetup status
 ```
 
 Never commit it. Kubernetes can't revoke a client certificate, so if the file leaks the
@@ -142,28 +175,31 @@ only fix is rotating the cluster CA (`k3s certificate rotate-ca`; see the k3s do
 re-issues every certificate in the cluster.
 
 **Firewall each node.** By default every node exposes the k3s API (6443) and node-exporter
-(9100, unauthenticated host metrics) to the whole LAN. Run this on **each** node. Add the
-SSH rule first, or enabling ufw will lock you out:
+(9100, unauthenticated host metrics) to the whole LAN. Run this on **each** node,
+replacing the `<...>` placeholders. Add the SSH rule first, or enabling ufw will lock
+you out. The rules allow, in order:
+
+1. SSH and the k3s API (for kubectl and helm) from your laptop.
+2. Everything from the other cluster nodes: API, kubelet, flannel VXLAN, node-exporter.
+3. The k3s pod and service networks. Without these, pod traffic breaks.
+4. Traefik on 80/443 from the LAN, only needed for the Grafana and Forgejo Ingresses.
 
 ```bash
 sudo apt install -y ufw
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
-sudo ufw allow from <laptop-ip> to any port 22 proto tcp     # SSH
-sudo ufw allow from <laptop-ip> to any port 6443 proto tcp   # kubectl / helm
+sudo ufw allow from <laptop-ip> to any port 22 proto tcp
+sudo ufw allow from <laptop-ip> to any port 6443 proto tcp
 
-# The other cluster nodes: API, kubelet, flannel VXLAN, node-exporter
 sudo ufw allow from <node1-ip>
 sudo ufw allow from <node2-ip>
 sudo ufw allow from <node3-ip>
 
-# k3s pod and service networks. Without these, pod traffic breaks.
 sudo ufw allow from 10.42.0.0/16
 sudo ufw allow from 10.43.0.0/16
 
-# Only if you use grafana-ingress.yaml: Traefik on 80/443 from the LAN
-sudo ufw allow from <lan-cidr, e.g. 192.168.1.0/24> to any port 80,443 proto tcp
+sudo ufw allow from <lan-cidr> to any port 80,443 proto tcp
 
 sudo ufw enable
 sudo ufw status numbered
@@ -174,14 +210,20 @@ on the LAN, `curl http://<node-ip>:9100/metrics` should hang.
 
 **Encrypt Secrets at rest.** Unless the server was started with `--secrets-encryption`,
 k3s stores Secrets, including `grafana-admin`, unencrypted in its datastore. On the
-server node:
+server node, check first:
 
 ```bash
-sudo k3s secrets-encrypt status      # "Encryption Status: Disabled" means do the rest
+sudo k3s secrets-encrypt status
+```
+
+If it says `Encryption Status: Disabled`, turn it on, re-encrypt the Secrets that
+already exist, and check that the status now says `Enabled`:
+
+```bash
 sudo k3s secrets-encrypt enable
 sudo systemctl restart k3s
-sudo k3s secrets-encrypt reencrypt   # encrypts the Secrets that already exist
-sudo k3s secrets-encrypt status      # should now say Enabled
+sudo k3s secrets-encrypt reencrypt
+sudo k3s secrets-encrypt status
 ```
 
 Take a backup of `/var/lib/rancher/k3s/server` first. The steps differ for multi-server

@@ -1,0 +1,85 @@
+# k3s enforces NetworkPolicy out of the box (embedded kube-router).
+# Applied by scripts/install-forgejo.sh after the chart.
+
+# Forgejo: only Traefik (for the Ingress) and the runner can reach the web port.
+# The SSH service the chart creates gets no traffic, since SSH is disabled.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forgejo
+  namespace: forgejo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo-runner
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# Runner: nothing needs to connect to it, and CI jobs run inside it. Jobs may reach
+# Forgejo, DNS and the internet, but not your LAN, the nodes or other pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forgejo-runner
+  namespace: forgejo-runner
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+    # forgejo.home.lab resolves to Traefik inside the cluster (coredns-custom.yaml),
+    # which is how actions/checkout reaches Forgejo. 8443 is Traefik's websecure
+    # port on the pod (443 on the Service).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # includes the k3s pod and service networks
+              - 172.16.0.0/12
+              - 192.168.0.0/16    # your LAN and the nodes
+              - 169.254.0.0/16
