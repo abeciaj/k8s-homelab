@@ -1,0 +1,10 @@
+# Trivy Operator and its scan jobs. Everything here runs as non-root with no host
+# access, so the namespace enforces Pod Security "restricted".
+# Applied by scripts/install-trivy-operator.sh before the chart.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trivy-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

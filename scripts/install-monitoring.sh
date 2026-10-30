@@ -28,8 +28,10 @@ echo "==> Adding Helm repo"
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
 helm repo update
 
+echo "==> Namespace"
+kubectl apply -f "${REPO_ROOT}/monitoring/namespace.yaml"
+
 echo "==> Grafana admin Secret"
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 if kubectl get secret -n monitoring grafana-admin >/dev/null 2>&1; then
   echo "    grafana-admin already exists, leaving it as is"
 else
@@ -52,6 +54,9 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
 
 echo "==> Applying network policies"
 kubectl apply -f "${REPO_ROOT}/monitoring/network-policies.yaml"
+
+echo "==> Node audit alerts"
+kubectl apply -f "${REPO_ROOT}/monitoring/node-audit-alerts.yaml"
 
 echo "==> Done. Watch pods come up with:"
 echo "    kubectl get pods -n monitoring -w"

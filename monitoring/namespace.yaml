@@ -1,0 +1,12 @@
+# node-exporter needs the host's network, PID namespace and filesystem, which the
+# cluster-wide Pod Security default (baseline, set in ansible-homelab's k3s
+# config) blocks. So this namespace allows privileged pods, and still warns about
+# anything below baseline.
+# Applied by scripts/install-monitoring.sh before the chart.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: baseline

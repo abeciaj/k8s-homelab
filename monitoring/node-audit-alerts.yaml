@@ -1,0 +1,43 @@
+# Alerts on the node audit results that the Ansible audit play (--tags audit)
+# writes to node-exporter's textfile collector. Results only change when the audit
+# runs, so these fire after a run, not continuously.
+# Applied by scripts/install-monitoring.sh after the chart.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-audit
+  namespace: monitoring
+  labels:
+    release: monitoring   # kube-prometheus-stack only loads rules with this label
+spec:
+  groups:
+    - name: node-audit
+      rules:
+        - alert: NodeFixableVulnerabilities
+          expr: debsecan_fixable_vulnerabilities * on (instance) group_left (nodename) node_uname_info > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.nodename }} has {{ $value }} package CVEs with a fix available"
+            description: Unattended upgrades missed them. Run the ansible-homelab playbook with `--tags base` to upgrade.
+        # Lower than the best score of the last 30 days: a change made the node
+        # less hardened.
+        - alert: NodeHardeningScoreDropped
+          expr: >-
+            (lynis_hardening_index < max_over_time(lynis_hardening_index[30d]))
+            * on (instance) group_left (nodename) node_uname_info
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.nodename }}'s Lynis hardening index dropped to {{ $value }}"
+            description: Compare the latest ~/homelab-audit/<date>/<node>-lynis.txt with an earlier one to see which check changed.
+        - alert: NodeAuditStale
+          expr: (time() - homelab_audit_last_run_timestamp_seconds) * on (instance) group_left (nodename) node_uname_info > 30 * 24 * 3600
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "{{ $labels.nodename }} hasn't been audited in over 30 days"
+            description: Run the ansible-homelab playbook with `--tags audit -K`.

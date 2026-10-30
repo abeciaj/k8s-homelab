@@ -4,7 +4,9 @@ A 3-node k3s homelab on Debian, from the **Back to On-Prem** series. This repo h
 the monitoring layer from Part 3: kube-prometheus-stack (Prometheus, Grafana,
 Alertmanager, node-exporter, kube-state-metrics) plus a Grafana Ingress via k3s's Traefik.
 It also holds a self-hosted Git server with CI/CD (Forgejo + Forgejo Actions); see
-[forgejo/README.md](forgejo/README.md).
+[forgejo/README.md](forgejo/README.md). For vulnerability scanning of running images
+(Trivy Operator) and a CIS benchmark of k3s itself (kube-bench), see
+[security/README.md](security/README.md).
 
 ## Layout
 
@@ -12,13 +14,17 @@ It also holds a self-hosted Git server with CI/CD (Forgejo + Forgejo Actions); s
 monitoring/values.yaml      Helm overrides for kube-prometheus-stack
 monitoring/grafana-ingress.yaml   HTTPS Ingress for grafana.home.lab (Traefik)
 monitoring/network-policies.yaml  Limits who can reach Prometheus, Alertmanager, Grafana
+monitoring/node-audit-alerts.yaml Alerts on the Ansible node audit results (Lynis, debsecan)
 scripts/install-monitoring.sh     Checks nodes, installs/upgrades the chart
 scripts/grafana-password.sh       Prints the Grafana admin password
 scripts/grafana-port-forward.sh   Forwards Grafana to localhost:3000
 scripts/install-forgejo.sh        Installs/upgrades Forgejo and its Actions runner
 scripts/install-cert-manager.sh   Installs cert-manager and the Homelab CA
+scripts/install-trivy-operator.sh Installs/upgrades Trivy Operator
+scripts/run-kube-bench.sh         Runs the k3s CIS benchmark on a node over SSH
 forgejo/                          Forgejo values, runner, namespaces, network policies
 cert-manager/                     cert-manager values and the Homelab CA
+security/                         Trivy Operator values, alerts, network policies
 ```
 
 ## Prerequisites

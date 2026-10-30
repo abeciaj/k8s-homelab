@@ -1,0 +1,97 @@
+# k3s enforces NetworkPolicy out of the box (embedded kube-router).
+# Applied by scripts/install-trivy-operator.sh after the chart.
+
+# Nothing reaches pods in this namespace unless a policy below allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: trivy-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Trivy server: only the scan jobs (and the operator) in this namespace. It has no
+# authentication, so nothing else should be able to query it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trivy-server
+  namespace: trivy-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: trivy-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 4954
+---
+# Operator metrics: only Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trivy-operator-metrics
+  namespace: trivy-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: trivy-operator
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8080
+---
+# Scan jobs and the Trivy server download images and the vulnerability database,
+# which is the code a compromised Trivy release would run. They may reach DNS, the
+# Trivy server and the internet, but not your LAN, the nodes, the Kubernetes API or
+# other pods. The operator is left out because it needs the API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scanners-egress
+  namespace: trivy-system
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values: [trivy-operator]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: trivy-server
+      ports:
+        - port: 4954
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # includes the k3s pod and service networks
+              - 172.16.0.0/12
+              - 192.168.0.0/16    # your LAN and the nodes
+              - 169.254.0.0/16
