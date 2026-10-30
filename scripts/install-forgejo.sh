@@ -73,11 +73,14 @@ else
   user="${FORGEJO_USER:-}"
   [[ -n "$user" ]] || read -rp "    Everyday (non-admin) username: " user
   [[ -n "$user" ]] || { echo "error: a username is required" >&2; exit 1; }
-  if forgejo_cli admin user list | awk 'NR > 1 { print $2 }' | grep -qx "$user"; then
+  # Not grep -q: exiting early can fail the pipeline under pipefail.
+  if forgejo_cli admin user list | awk 'NR > 1 { print $2 }' | grep -x "$user" >/dev/null; then
     echo "    user $user already exists"
   else
     email="${FORGEJO_USER_EMAIL:-}"
-    [[ -n "$email" ]] || read -rp "    Email for $user: " email
+    [[ -n "$email" ]] || read -rp "    Email for $user (empty = $user@forgejo.home.lab): " email
+    # Forgejo requires one, but this instance sends no mail, so a placeholder works.
+    [[ -n "$email" ]] || email="$user@forgejo.home.lab"
     # Prints a one-time password; Forgejo makes the user change it at first login.
     forgejo_cli admin user create --username "$user" --email "$email" --random-password
   fi
@@ -85,9 +88,11 @@ else
   # Offline registration: Forgejo and the runner share a random 40-hex secret.
   # The runner's UUID is the first 16 characters read as raw bytes; the token is
   # the whole secret. Passed on stdin, so it never appears in a process listing.
+  # Forgejo 15 defines --secret-stdin as a string flag but only checks that it's
+  # set, so it needs a value; "-" is the usual stand-in for stdin.
   secret="$(openssl rand -hex 20)"
   printf '%s' "$secret" | forgejo_cli forgejo-cli actions register \
-    --name "$RUNNER_NAME" --scope "$user" --secret-stdin
+    --name "$RUNNER_NAME" --scope "$user" --secret-stdin=-
   uuid="$(printf '%s' "${secret:0:16}" | xxd -p | sed -E 's/(.{8})(.{4})(.{4})(.{4})(.{12})/\1-\2-\3-\4-\5/')"
   printf '%s' "$secret" | kubectl create secret generic forgejo-runner -n forgejo-runner \
     --from-literal=uuid="$uuid" --from-file=token=/dev/stdin
@@ -118,6 +123,6 @@ kubectl apply -f "${REPO_ROOT}/forgejo/network-policies.yaml"
 kubectl rollout status deploy/forgejo-runner -n forgejo-runner --timeout=5m
 
 echo "==> Done. Next:"
-echo "    echo \"<node-ip> forgejo.home.lab\" | sudo tee -a /etc/hosts"
+echo "    point forgejo.home.lab at any node's IP in /etc/hosts (see forgejo/README.md)"
 echo "    open https://forgejo.home.lab   (set up 2FA when asked)"
 echo "    kubectl get secret -n forgejo forgejo-admin -o jsonpath='{.data.password}' | base64 --decode; echo"

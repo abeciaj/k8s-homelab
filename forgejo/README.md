@@ -44,8 +44,11 @@ On the first run it asks for:
 1. **An admin username and password**, for administration only. Leave the
    password empty to generate one.
 2. **An everyday username and email**, for a normal, non-admin account you use for
-   your own repos. Forgejo prints a one-time password for it and asks for a new one
-   at first login. Set `FORGEJO_USER` and `FORGEJO_USER_EMAIL` to skip these prompts.
+   your own repos. Leave the email empty for `<user>@forgejo.home.lab`; this
+   Forgejo sends no mail. Forgejo prints a one-time password for it and asks for a
+   new one at first login. Set `FORGEJO_USER` and `FORGEJO_USER_EMAIL` to skip these
+   prompts. Only the first run asks: after the runner is registered, re-runs skip
+   this step.
 
 It then installs the chart, registers the runner for the everyday account's repos
 and applies the network policies. Re-running upgrades in place and leaves both

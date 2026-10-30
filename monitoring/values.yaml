@@ -80,6 +80,16 @@ grafana:
     limits:
       memory: 1Gi
 
+prometheus-node-exporter:
+  # Setting extraArgs replaces the chart's list, so its two filesystem excludes are
+  # repeated here. The textfile directory is where the Ansible audit play
+  # (--tags audit) writes Lynis and debsecan results; the host's / is already
+  # mounted read-only at /host/root.
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
+    - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile_collector
+
 # k3s runs the scheduler, controller-manager, kube-proxy and etcd inside the k3s
 # binary, so there are no separate endpoints to scrape. Left enabled, their
 # targets show as down and their "...Down" alerts fire permanently.

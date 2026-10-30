@@ -1,0 +1,38 @@
+# Alerts for findings that need action. Reports only include high and critical
+# vulnerabilities with a fix available (values.yaml), so each alert means "update
+# this image".
+# Applied by scripts/install-trivy-operator.sh when the monitoring stack is installed.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+  labels:
+    release: monitoring   # kube-prometheus-stack only loads rules with this label
+spec:
+  groups:
+    - name: trivy-operator
+      rules:
+        - alert: CriticalVulnerabilityInImage
+          expr: max by (namespace, image_repository, image_tag) (trivy_image_vulnerabilities{severity="Critical"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.image_repository }}:{{ $labels.image_tag }} in {{ $labels.namespace }} has {{ $value }} fixable critical vulnerabilities"
+            description: List them with `kubectl get vulnerabilityreports -n {{ $labels.namespace }} -o wide`, then update the image.
+        - alert: SecretExposedInImage
+          expr: max by (namespace, image_repository, image_tag) (trivy_image_exposedsecrets) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.image_repository }}:{{ $labels.image_tag }} in {{ $labels.namespace }} contains a secret"
+            description: See `kubectl get exposedsecretreports -n {{ $labels.namespace }} -o wide`.
+        - alert: TrivyOperatorDown
+          expr: absent(up{job="trivy-operator", namespace="trivy-system"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Trivy Operator isn't being scraped, so new vulnerabilities go unreported

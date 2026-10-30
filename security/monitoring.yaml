@@ -1,0 +1,7 @@
+# Extra Trivy Operator values, used only when the monitoring stack is installed
+# (scripts/install-trivy-operator.sh checks for its ServiceMonitor CRD).
+serviceMonitor:
+  enabled: true
+  # kube-prometheus-stack only picks up ServiceMonitors labelled with its release.
+  labels:
+    release: monitoring
