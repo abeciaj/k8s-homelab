@@ -13,19 +13,25 @@ Two tools, covering different layers:
 ## Layout
 
 ```
-security/values.yaml            Helm overrides for the Trivy Operator chart
-security/namespace.yaml         trivy-system, enforcing Pod Security "restricted"
-security/network-policies.yaml  Who can reach the Trivy server and operator metrics
-security/monitoring.yaml        Extra values when the monitoring stack is installed
-security/alerts.yaml            Prometheus alerts for fixable critical CVEs and secrets
-security/dashboard.json         Grafana dashboard, loaded by the script
+security/values.yaml               Helm overrides for the Trivy Operator chart
+security/namespace.yaml            trivy-system, enforcing Pod Security "restricted"
+security/network-policies.yaml     Who can reach the Trivy server and operator metrics
+security/monitoring.yaml           Extra values when the monitoring stack is installed
+security/alerts.yaml               Prometheus alerts for fixable critical CVEs and secrets
+security/dashboard.json            Grafana dashboard, loaded by the script
 scripts/install-trivy-operator.sh  Installs/upgrades Trivy Operator
 scripts/run-kube-bench.sh          Runs the k3s CIS benchmark on a node over SSH
 ```
 
-## Install Trivy Operator
+## Prerequisites
 
-Install the monitoring stack first if you want metrics and alerts.
+- The k3s cluster from Part 2, with `kubectl` and `helm` on your workstation (see
+  the main README).
+- Optional: the monitoring stack, for metrics, the dashboard and alerts. Install it
+  first, or re-run the script after you do.
+- For kube-bench: SSH access to the nodes, with sudo.
+
+## Install Trivy Operator
 
 ```bash
 ./scripts/install-trivy-operator.sh
@@ -142,8 +148,8 @@ addresses it. Re-run after k3s upgrades.
 
 ## Hardening
 
-- Everything in `trivy-system`, including the scan jobs the operator creates, runs
-  as non-root with a read-only filesystem, no capabilities and no host access. The
+- **Locked-down pods.** Everything in `trivy-system`, including the scan jobs the
+  operator creates, runs as non-root with a read-only filesystem, no capabilities and no host access. The
   namespace enforces Pod Security "restricted", so a pod that asks for more is
   rejected.
 - **Supply chain.** The chart is verified against a pinned SHA-256 before install,
@@ -155,8 +161,8 @@ addresses it. Re-run after k3s upgrades.
   operator's metrics. The scan jobs and the Trivy server, which handle downloaded
   images and data, can only reach DNS, the Trivy server and the internet: not your
   LAN, the nodes or the Kubernetes API.
-- The operator reads every workload and RBAC object in the cluster, which it needs
-  in order to scan them. By default it can also read every Secret, to use
+- **Limited Secret access.** The operator reads every workload and RBAC object in
+  the cluster, which it needs in order to scan them. By default it can also read every Secret, to use
   workloads' image pull secrets. That would include the Homelab CA's private key,
   so `values.yaml` turns it off: it only touches Secrets in its own namespace.
   Every image here is public, so nothing is lost. If you add a private registry,

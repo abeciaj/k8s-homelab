@@ -1,0 +1,11 @@
+# Home Assistant's container runs as root (its s6-overlay init needs it), so the
+# namespace enforces Pod Security "baseline", not "restricted": no privileged
+# containers, host namespaces or hostPath. Warnings still flag anything below
+# restricted. Applied by scripts/install-homeassistant.sh.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homeassistant
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted

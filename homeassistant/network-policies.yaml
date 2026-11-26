@@ -1,0 +1,64 @@
+# k3s enforces NetworkPolicy out of the box (embedded kube-router).
+# Applied by scripts/install-homeassistant.sh.
+
+# Only Traefik can reach the web UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: homeassistant-ingress
+  namespace: homeassistant
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8123
+          protocol: TCP
+---
+# Home Assistant talks to devices on your LAN and to cloud services, so it may
+# reach the LAN and the internet. It may not reach the cluster nodes, other pods
+# or the Kubernetes API: a compromised integration can't pivot into the cluster.
+# Change the three node IPs if yours differ.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: homeassistant-egress
+  namespace: homeassistant
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 192.168.0.0/16    # your LAN and its devices
+            except:
+              - 192.168.0.151/32    # the cluster nodes
+              - 192.168.0.152/32
+              - 192.168.0.153/32
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8          # includes the k3s pod and service networks
+              - 172.16.0.0/12
+              - 192.168.0.0/16      # allowed above, minus the nodes
+              - 169.254.0.0/16

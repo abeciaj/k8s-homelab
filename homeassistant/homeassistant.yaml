@@ -1,0 +1,201 @@
+# Home Assistant (container install), LAN-only at https://ha.home.lab.
+# Applied by scripts/install-homeassistant.sh after namespace.yaml.
+
+# Home Assistant never calls the Kubernetes API, so it gets no token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: homeassistant
+  namespace: homeassistant
+automountServiceAccountToken: false
+---
+# Everything Home Assistant keeps: configuration, automations, history (SQLite).
+# local-path pins it to one node; move to Longhorn once it's installed.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: homeassistant-config
+  namespace: homeassistant
+spec:
+  storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+# Written to /config only on the first start; edit it in the volume after that.
+#
+# Home Assistant rejects proxied requests unless it trusts the proxy, and Traefik
+# reaches it from the pod network. Home Assistant keeps its http settings in
+# .storage/http, not in configuration.yaml: an http: block in YAML is imported once
+# as a trial that has to be confirmed in the UI, and the UI can't be reached through
+# Traefik until the proxy is trusted. So http.json seeds the trusted proxy directly
+# as the active ("stable") settings.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homeassistant-initial-config
+  namespace: homeassistant
+data:
+  configuration.yaml: |
+    default_config:
+
+    frontend:
+      themes: !include_dir_merge_named themes
+
+    automation: !include automations.yaml
+    script: !include scripts.yaml
+    scene: !include scenes.yaml
+  http.json: |
+    {
+      "version": 3,
+      "minor_version": 1,
+      "key": "http",
+      "data": {
+        "stable": {
+          "server_port": 8123,
+          "use_x_forwarded_for": true,
+          "trusted_proxies": ["10.42.0.0/16"],
+          "cors_allowed_origins": ["https://cast.home-assistant.io"],
+          "login_attempts_threshold": -1,
+          "ip_ban_enabled": true,
+          "ssl_profile": "intermediate_v6",
+          "use_x_frame_options": true,
+          "created_at": "@NOW@",
+          "error": null,
+          "error_message": null
+        },
+        "pending": null,
+        "yaml_migration_done": true
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homeassistant
+  namespace: homeassistant
+spec:
+  replicas: 1
+  # The config volume is ReadWriteOnce, so replace the pod instead of rolling.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: homeassistant
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: homeassistant
+    spec:
+      serviceAccountName: homeassistant
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: initial-config
+          image: ghcr.io/home-assistant/home-assistant:2026.11.1@sha256:6785d1eca68747a524c156faae1b139ed415c07357386ae6fe17291986e59e82
+          command: [sh, -euc]
+          args:
+            - |
+              cd /config
+              if [ ! -f configuration.yaml ]; then
+                cp /initial/configuration.yaml configuration.yaml
+                mkdir -p themes
+                echo "[]" > automations.yaml
+                : > scripts.yaml
+                echo "[]" > scenes.yaml
+                echo "wrote the initial configuration.yaml"
+              fi
+              if [ ! -f .storage/http ]; then
+                mkdir -p .storage
+                sed "s/@NOW@/$(date -u +%Y-%m-%dT%H:%M:%S+00:00)/" /initial/http.json > .storage/http
+                echo "seeded .storage/http with the trusted proxy"
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: initial-config
+              mountPath: /initial
+      containers:
+        - name: homeassistant
+          # Pinned by digest as well as version: a tag can be repointed, a digest
+          # can't. Update both together.
+          image: ghcr.io/home-assistant/home-assistant:2026.11.1@sha256:6785d1eca68747a524c156faae1b139ed415c07357386ae6fe17291986e59e82
+          ports:
+            - name: http
+              containerPort: 8123
+          securityContext:
+            allowPrivilegeEscalation: false
+          # The first start installs Python packages for the default integrations,
+          # so give it a few minutes before liveness checks begin.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: homeassistant-config
+        - name: initial-config
+          configMap:
+            name: homeassistant-initial-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homeassistant
+  namespace: homeassistant
+spec:
+  selector:
+    app.kubernetes.io/name: homeassistant
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+---
+# HTTPS only, with a certificate from the Homelab CA (scripts/install-cert-manager.sh).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: homeassistant
+  namespace: homeassistant
+  annotations:
+    cert-manager.io/cluster-issuer: homelab-ca
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: homeassistant-tls
+      hosts:
+        - ha.home.lab
+  rules:
+    - host: ha.home.lab
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: homeassistant
+                port:
+                  number: 8123

@@ -1,30 +1,38 @@
 # k8s-homelab
 
-A 3-node k3s homelab on Debian, from the **Back to On-Prem** series. This repo holds
-the monitoring layer from Part 3: kube-prometheus-stack (Prometheus, Grafana,
-Alertmanager, node-exporter, kube-state-metrics) plus a Grafana Ingress via k3s's Traefik.
-It also holds a self-hosted Git server with CI/CD (Forgejo + Forgejo Actions); see
-[forgejo/README.md](forgejo/README.md). For vulnerability scanning of running images
-(Trivy Operator) and a CIS benchmark of k3s itself (kube-bench), see
-[security/README.md](security/README.md).
+A 3-node k3s homelab on Debian, from the **Back to On-Prem** series. This README covers
+the workstation setup, trusted certificates, and the monitoring layer from Part 3:
+kube-prometheus-stack (Prometheus, Grafana, Alertmanager, node-exporter,
+kube-state-metrics) plus a Grafana Ingress via k3s's Traefik.
+
+Every other component has its own README:
+
+| Component | What it is | Docs |
+|---|---|---|
+| cert-manager | Private Homelab CA that issues the `*.home.lab` certificates | [cert-manager/README.md](cert-manager/README.md) |
+| Forgejo | Self-hosted Git server with CI/CD (Forgejo Actions) | [forgejo/README.md](forgejo/README.md) |
+| Security | Image vulnerability scanning (Trivy Operator) and a CIS benchmark of k3s (kube-bench) | [security/README.md](security/README.md) |
+| Home Assistant | Home automation, LAN only | [homeassistant/README.md](homeassistant/README.md) |
 
 ## Layout
 
 ```
-monitoring/values.yaml      Helm overrides for kube-prometheus-stack
-monitoring/grafana-ingress.yaml   HTTPS Ingress for grafana.home.lab (Traefik)
-monitoring/network-policies.yaml  Limits who can reach Prometheus, Alertmanager, Grafana
-monitoring/node-audit-alerts.yaml Alerts on the Ansible node audit results (Lynis, debsecan)
-scripts/install-monitoring.sh     Checks nodes, installs/upgrades the chart
-scripts/grafana-password.sh       Prints the Grafana admin password
-scripts/grafana-port-forward.sh   Forwards Grafana to localhost:3000
-scripts/install-forgejo.sh        Installs/upgrades Forgejo and its Actions runner
-scripts/install-cert-manager.sh   Installs cert-manager and the Homelab CA
-scripts/install-trivy-operator.sh Installs/upgrades Trivy Operator
-scripts/run-kube-bench.sh         Runs the k3s CIS benchmark on a node over SSH
-forgejo/                          Forgejo values, runner, namespaces, network policies
-cert-manager/                     cert-manager values and the Homelab CA
-security/                         Trivy Operator values, alerts, network policies
+monitoring/values.yaml             Helm overrides for kube-prometheus-stack
+monitoring/grafana-ingress.yaml    HTTPS Ingress for grafana.home.lab (Traefik)
+monitoring/network-policies.yaml   Limits who can reach Prometheus, Alertmanager, Grafana
+monitoring/node-audit-alerts.yaml  Alerts on the Ansible node audit results (Lynis, debsecan)
+scripts/install-monitoring.sh      Checks nodes, installs/upgrades the chart
+scripts/grafana-password.sh        Prints the Grafana admin password
+scripts/grafana-port-forward.sh    Forwards Grafana to localhost:3000
+scripts/install-forgejo.sh         Installs/upgrades Forgejo and its Actions runner
+scripts/install-cert-manager.sh    Installs cert-manager and the Homelab CA
+scripts/install-trivy-operator.sh  Installs/upgrades Trivy Operator
+scripts/run-kube-bench.sh          Runs the k3s CIS benchmark on a node over SSH
+scripts/install-homeassistant.sh   Installs/upgrades Home Assistant
+forgejo/                           Forgejo values, runner, namespaces, network policies
+cert-manager/                      cert-manager values and the Homelab CA
+security/                          Trivy Operator values, alerts, network policies
+homeassistant/                     Home Assistant, its volume, Ingress, network policies
 ```
 
 ## Prerequisites
@@ -70,8 +78,8 @@ they talk to the k3s API server on port 6443, and the cluster schedules the pods
 ## Trusted certificates
 
 cert-manager runs a private **Homelab CA** that issues certificates for `*.home.lab`.
-Grafana and Forgejo get theirs automatically and renew them before they expire.
-Install it before the Grafana Ingress or Forgejo, then trust the CA once per device.
+Grafana, Forgejo and Home Assistant get theirs automatically and renew them before
+they expire. Install it before any of them, then trust the CA once per device.
 On macOS:
 
 ```bash
@@ -188,7 +196,8 @@ you out. The rules allow, in order:
 1. SSH and the k3s API (for kubectl and helm) from your laptop.
 2. Everything from the other cluster nodes: API, kubelet, flannel VXLAN, node-exporter.
 3. The k3s pod and service networks. Without these, pod traffic breaks.
-4. Traefik on 80/443 from the LAN, only needed for the Grafana and Forgejo Ingresses.
+4. Traefik on 80/443 from the LAN, only needed for the Ingresses (Grafana, Forgejo,
+   Home Assistant).
 
 ```bash
 sudo apt install -y ufw
