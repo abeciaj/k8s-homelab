@@ -1,17 +1,17 @@
 # cert-manager + Homelab CA
 
 A private certificate authority for `*.home.lab`, run by
-[cert-manager](https://cert-manager.io). Grafana, Forgejo and anything added later
-get real certificates that your devices trust, renewed automatically.
+[cert-manager](https://cert-manager.io). Grafana, Forgejo, Home Assistant and anything
+added later get real certificates that your devices trust, renewed automatically.
 
 ## Layout
 
 ```
-cert-manager/values.yaml        Helm overrides for the cert-manager chart
-cert-manager/homelab-ca.yaml    The CA certificate and the ClusterIssuers
-cert-manager/monitoring.yaml    Extra values when the monitoring stack is installed
-cert-manager/alerts.yaml        Prometheus alerts for certificates
-scripts/install-cert-manager.sh Installs/upgrades everything and exports the CA
+cert-manager/values.yaml         Helm overrides for the cert-manager chart
+cert-manager/homelab-ca.yaml     The CA certificate and the ClusterIssuers
+cert-manager/monitoring.yaml     Extra values when the monitoring stack is installed
+cert-manager/alerts.yaml         Prometheus alerts for certificates
+scripts/install-cert-manager.sh  Installs/upgrades everything and exports the CA
 ```
 
 ## How it works
@@ -37,9 +37,14 @@ The CA has an X.509 **name constraint**: it can only sign `home.lab` names. Your
 devices trust it for everything, so this limits the damage if its key ever leaks.
 It can't be used to impersonate a real website.
 
-## Install
+## Prerequisites
 
-Install the monitoring stack first if you want certificate alerts (see Alerts).
+- The k3s cluster from Part 2, with `kubectl` and `helm` on your workstation (see
+  the main README).
+- Optional: the monitoring stack, for certificate alerts (see Alerts). Install it
+  first, or re-run the script after you do.
+
+## Install
 
 ```bash
 ./scripts/install-cert-manager.sh
@@ -133,11 +138,13 @@ Alertmanager has a receiver, they show in Grafana under **Alerting → Alert rul
 
 ## Hardening
 
-- The CA's private key never leaves the cluster. The script exports only the public
+- **The CA key stays in the cluster.** The script exports only the public
   certificate.
-- The name constraint limits the CA to `home.lab`, even for a device that trusts it.
-- cert-manager's chart already runs non-root, with a read-only root filesystem,
-  all Linux capabilities dropped and seccomp `RuntimeDefault`.
+- **Name constraint.** The CA can only sign `home.lab` names, even for a device
+  that trusts it.
+- **Locked-down pods.** cert-manager's chart already runs non-root, with a
+  read-only root filesystem, all Linux capabilities dropped and seccomp
+  `RuntimeDefault`.
 
 ## Upgrading
 
